@@ -1,0 +1,106 @@
+﻿;#################################  LEXER  ######################################################################
+
+(defparameter *seps* (make-hash-table :test #'equal))
+(setf (gethash "(" *seps*) 'o-parenth)
+(setf (gethash ")" *seps*) 'c-parenth)
+
+(defparameter *opers* (make-hash-table :test #'equal))
+(setf (gethash "+" *opers*) 'add)
+(setf (gethash "-" *opers*) 'sub)
+(setf (gethash "/" *opers*) 'div)
+(setf (gethash "*" *opers*) 'mul)
+
+(defparameter *rwords* (make-hash-table :test #'equal))
+(setf (gethash "const" *rwords*) 'num)
+    
+    
+    
+(defun lexer (str &optional res &aux tmp)
+    (setf tmp (multiple-value-bind (num pos) (parse-integer str :junk-allowed t) (list num pos)))
+    (cond   ((= (length str) 0) (reverse res))
+            ((and (not (= (second tmp) 0)) (not (null (first tmp))))
+                (push (list (gethash "const" *rwords*) (first tmp)) res)
+                (lexer (subseq str (second tmp)) res))
+            ((eq (char str 0) #\Space) (lexer (subseq str 1) res))
+            ((not (null (gethash (subseq str 0 1) *opers*))) (push (gethash (subseq str 0 1) *opers*) res) 
+                                                            (lexer (subseq str 1) res))
+            ((not (null (gethash (subseq str 0 1) *seps*))) (push (gethash (subseq str 0 1) *seps*) res)
+                                                            (lexer (subseq str 1) res))
+            (t (format nil "Not allowed symbol found!"))))
+            
+;#################################################################################################################
+(defparameter *get-opers* (make-hash-table :test #'eq))
+(setf (gethash 'add *get-opers*) #'+)
+(setf (gethash 'sub *get-opers*) #'-)
+(setf (gethash 'div *get-opers*) #'/)
+(setf (gethash 'mul *get-opers*) #'*)
+
+
+(defun expr (TOKENS) 
+    (let* ((first-op (multiple-value-list (term TOKENS)))
+            (rest (multiple-value-list (expr-list (nthcdr (second first-op) TOKENS)))))
+                    (cond ((or (eq (caar rest) 'num) (eq (caar first-op) 'num))
+                            (values (list 'expr (nth (second first-op) TOKENS) (car first-op) (car rest))
+                                                                                    (+ 1 (second rest) (second first-op))))
+                    (t (values (car first-op) (second first-op))))))
+
+
+(defun expr-list (TOKENS)
+    (cond
+        ((null TOKENS) nil)
+        ((or (eq (car TOKENS) 'add) (eq (car TOKENS) 'sub))
+            (let* ((first-op (multiple-value-list (term (cdr TOKENS))))
+                     (second-op (multiple-value-list (expr-list (nthcdr (1+ (second first-op)) TOKENS))))
+                     (op  (nth (1+ (second first-op)) TOKENS)))
+                 (if (or (null (car second-op)) (and (not (eq 'add op)) (not (eq 'sub op)))) 
+                     (values (car first-op) (second first-op))
+                     (values (list 'expr op (car first-op) (car second-op)) (+ (second second-op) (second first-op))))))
+        (t (values nil 1))))
+
+        
+(defun term (TOKENS)
+    (let* ((first-op  (multiple-value-list(factor TOKENS)))
+             (second-op (multiple-value-list (term-list (nthcdr (second first-op) TOKENS))))
+             (op (nth (second first-op) TOKENS)))
+        (if (or (null (car second-op)) (eq 'end-par second-op))
+            (values (car first-op) (second first-op))
+            (values (remove nil (list 'expr op (car first-op) (car second-op))) (+ 1 (second second-op) (second first-op))))))
+
+            
+(defun term-list (TOKENS) 
+    (cond 
+        ((null TOKENS) nil)
+        ((or (eq (car TOKENS) 'div) (eq (car TOKENS) 'mul))
+             (let*  ( (fact (multiple-value-list (factor (cdr TOKENS))))
+                        (terms (multiple-value-list (term-list (nthcdr (1+ (second fact)) TOKENS))))
+                        (op (nth (1+ (second fact)) TOKENS)))
+                (if (or (null terms) (and (not (eq 'mul op)) (not (eq 'div op))))
+                    (values (car fact) (second fact))
+                    (values (remove nil (list 'expr op (car fact) (car terms))) (+ 1 (second fact) (second terms))))))
+        (t (values nil 1))))
+    
+
+(defun factor (TOKENS) 
+    (cond   
+        ((not (atom (car TOKENS))) (if (eq 'num (car (car TOKENS))) (values (car TOKENS) 1)))
+        ((eq 'o-parenth (car TOKENS)) (let* ((tmp-expr (multiple-value-list (expr (cdr TOKENS))))) 
+                                            (if (eq (nth (second tmp-expr) (cdr TOKENS)) 'c-parenth) (values (car tmp-expr) (+ 2 (second tmp-expr))) 
+                                                    (format nil "C-parenth error: ~a~a" TOKENS #\Newline))))
+        (t  (format nil "Factor error: ~a~a" TOKENS #\Newline))))
+
+        
+(defun parser (TOKENS)
+    (expr TOKENS))
+    
+    
+(defun calc (tree) 
+    (cond
+        ((null tree) nil)
+        ((atom tree) tree)
+        ((eq 'expr (first tree)) (if (or (eq 'mul (second tree)) (eq 'div (second tree)) (eq 'add (second tree)) (eq 'sub (second tree)))                                           
+                                            (apply (gethash (second tree) *get-opers*) 
+                                            (mapcar 'calc (cddr tree)))))
+        ((eq 'num (first tree)) (second tree))
+        (t (format t "Error counting at ~a~a" tree #\Newline))))
+       
+;(print (calc '(expr add (expr mul (num 2) (expr sub (num 4) (num 5)) (num 3)) 1)))
